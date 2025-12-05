@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Map Requests — Demo</title>
+
+<!-- Leaflet -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<style>
+  html,body{height:100%;margin:0;font-family:system-ui,Segoe UI,Roboto,Arial}
+  #wrap{
+    height:100vh;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    perspective:1200px;
+    background: linear-gradient(180deg,#071b2f,#01121a);
+    color:#ddd;
+  }
+  .scene {
+    width:92vw;
+    max-width:1400px;
+    height:84vh;
+    border-radius:14px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6), inset 0 1px rgba(255,255,255,0.02);
+    transform-style:preserve-3d;
+    transition: transform 0.6s cubic-bezier(.2,.9,.3,1);
+    background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.02));
+    overflow:hidden;
+  }
+
+  .rotater {
+    width:100%;
+    height:100%;
+    transform-origin:50% 50%;
+    will-change: transform;
+  }
+
+  #map { width:100%; height:100%; border-radius:14px; }
+
+  /* server pulse */
+  .server-pulse {
+    box-shadow: 0 0 0 rgba(34,197,94,0.6);
+    border-radius:50%;
+    position:absolute;
+    transform: translate(-50%, -50%);
+    pointer-events:none;
+    animation: pulse 2s infinite;
+    width:18px;
+    height:18px;
+    background: radial-gradient(circle at 40% 35%, #ccffde 0 25%, #22c55e 26% 60%, #0b6b34 61%);
+    border: 2px solid rgba(255,255,255,0.06);
+  }
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(34,197,94,0.45); }
+    70% { box-shadow: 0 0 0 20px rgba(34,197,94,0); }
+    100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); }
+  }
+
+  /* visitor blinking */
+  .visitor-dot {
+    width:10px;
+    height:10px;
+    border-radius:50%;
+    transform: translate(-50%,-50%);
+    position:absolute;
+    pointer-events:none;
+    background: radial-gradient(circle at 30% 30%, #ffffff 0 20%, #ffd166 21% 40%, #ff7b7b 41%);
+    box-shadow: 0 0 12px rgba(255,200,80,0.35);
+    animation: blink 1.2s infinite;
+  }
+  @keyframes blink {
+    0% { opacity:1; transform: translate(-50%,-50%) scale(1); }
+    50% { opacity:0.25; transform: translate(-50%,-50%) scale(0.8); }
+    100% { opacity:1; transform: translate(-50%,-50%) scale(1); }
+  }
+
+  /* SELF visitor */
+  .self-dot {
+    width:14px;
+    height:14px;
+    border-radius:50%;
+    transform:translate(-50%,-50%);
+    position:absolute;
+    pointer-events:none;
+    background: radial-gradient(circle,#fff 0 30%,#ffe066 31% 70%,#ffb703 71%);
+    box-shadow:0 0 15px rgba(255,220,120,0.7);
+    animation: blink 0.9s infinite;
+  }
+
+  .controls {
+    position:absolute;
+    top:12px;
+    left:12px;
+    z-index:9999;
+    display:flex;
+    gap:8px;
+  }
+  .controls button, .controls select {
+    background: rgba(255,255,255,0.06);
+    color:#e6faf0;
+    border:1px solid rgba(255,255,255,0.04);
+    padding:8px 10px;
+    border-radius:8px;
+    cursor:pointer;
+    backdrop-filter: blur(6px);
+  }
+
+  .legend {
+    position:absolute;
+    bottom:12px; left:12px;
+    z-index:9999;
+    background: rgba(0,0,0,0.25);
+    padding:8px 12px;
+    border-radius:8px;
+    color:#dfe;
+    font-size:13px;
+    border:1px solid rgba(255,255,255,0.03);
+  }
+
+  #overlay {
+    position:absolute;
+    inset:0;
+    width:100%;
+    height:100%;
+    pointer-events:none;
+    z-index:520;
+  }
+
+  .info {
+    position:absolute;
+    right:12px; top:12px;
+    z-index:9999;
+    color:#cde;
+    background: rgba(255,255,255,0.02);
+    padding:6px 8px;
+    border-radius:8px;
+    border:1px solid rgba(255,255,255,0.03);
+  }
+
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div class="scene" id="scene">
+    <div class="controls" id="controls">
+      <button id="btn-sim">Random request</button>
+      <select id="sel-server"></select>
+      <button id="btn-rotate">Toggle 3D rotate</button>
+      <button id="btn-clear">Clear paths</button>
+    </div>
+
+    <div class="info" id="info">Servers: <span id="server-count">0</span> · Visitors: <span id="visitor-count">0</span></div>
+    <div class="rotater" id="rotater">
+      <div id="map"></div>
+      <canvas id="overlay"></canvas>
+    </div>
+
+    <div class="legend">
+      <div><span style="display:inline-block;width:10px;height:10px;background:#22c55e;border-radius:50%;margin-right:8px"></span> Server</div>
+      <div style="margin-top:6px"><span style="display:inline-block;width:8px;height:8px;background:#ffd166;border-radius:50%;margin-right:8px"></span> Visitor</div>
+      <div style="margin-top:6px;font-size:12px;color:#aac">Click "Random request" or click any visitor marker to send a request.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* =======================
+   DATA
+   ======================= */
+const servers = [
+  { id:'SFO', name:'San Francisco (SFO)', lat:37.7749, lon:-122.4194 },
+  { id:'LON', name:'London (LON)', lat:51.5074, lon:-0.1278 },
+  { id:'SGP', name:'Singapore (SGP)', lat:1.3521, lon:103.8198 },
+  { id:'SYD', name:'Sydney (SYD)', lat:-33.8688, lon:151.2093 },
+  { id:'SAO', name:'Sao Paulo (SAO)', lat:-23.5505, lon:-46.6333 },
+];
+
+const visitors = [
+  { id:'U1', name:'User A', lat:40.730610, lon:-73.935242, server:'SFO' },
+  { id:'U2', name:'User B', lat:48.8566, lon:2.3522, server:'LON' },
+  { id:'U3', name:'User C', lat:13.7563, lon:100.5018, server:'SGP' },
+  { id:'U4', name:'User D', lat:-37.8136, lon:144.9631, server:'SYD' },
+  { id:'U5', name:'User E', lat:-23.5505, lon:-46.6333, server:'SAO' },
+];
+
+const rainbow7 = ['#ff0033','#ff7a00','#ffd300','#7fff00','#00bfff','#3f00ff','#d600ff'];
+
+/* =======================
+   MAP INIT (DARK)
+   ======================= */
+const map = L.map('map', {
+  worldCopyJump: true,
+  zoomControl: false,
+  attributionControl: false,
+  minZoom:2,
+  maxZoom:6,
+}).setView([20,0], 2);
+
+L.tileLayer(
+  'https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png',
+  { maxZoom: 20 }
+).addTo(map);
+
+const serverLayer = L.layerGroup().addTo(map);
+const visitorLayer = L.layerGroup().addTo(map);
+const pathLayer = L.layerGroup().addTo(map);
+
+const serverMap = new Map();
+servers.forEach(s => {
+  const m = L.circleMarker([s.lat, s.lon], {
+    radius:8, color:'#0b7a3b', weight:1, fillColor:'#22c55e', fillOpacity:0.95
+  }).addTo(serverLayer);
+  m.bindTooltip(`${s.id} — ${s.name}`);
+
+  const pulse = L.divIcon({
+    className:'',
+    html:`<div class="server-pulse"></div>`,
+    iconSize:[18,18], iconAnchor:[9,9]
+  });
+  L.marker([s.lat, s.lon], {icon:pulse, interactive:false}).addTo(serverLayer);
+
+  serverMap.set(s.id, s);
+});
+
+const visitorMap = new Map();
+visitors.forEach(v => {
+  const icon = L.divIcon({
+    className:'',
+    html:`<div class="visitor-dot"></div>`,
+    iconSize:[10,10], iconAnchor:[5,5]
+  });
+  const mark = L.marker([v.lat, v.lon],{icon}).addTo(visitorLayer);
+  mark.on('click',()=>sendRequest(v.id));
+  mark.bindTooltip(v.name);
+  visitorMap.set(v.id, v);
+});
+
+const sel = document.getElementById('sel-server');
+servers.forEach(s=>{
+  const o=document.createElement('option');
+  o.value=s.id; o.textContent=`${s.id} — ${s.name}`;
+  sel.appendChild(o);
+});
+document.getElementById('server-count').textContent=servers.length;
+document.getElementById('visitor-count').textContent=visitors.length;
+
+/* =======================
+   CANVAS
+   ======================= */
+const overlay=document.getElementById('overlay');
+const ctx=overlay.getContext('2d');
+
+function resizeCanvas(){
+  const r=map.getContainer().getBoundingClientRect();
+  overlay.width=r.width*devicePixelRatio;
+  overlay.height=r.height*devicePixelRatio;
+  ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+}
+resizeCanvas();
+window.addEventListener('resize',resizeCanvas);
+
+function latLngToPoint(latlng){
+  const p=map.latLngToContainerPoint(latlng);
+  return [p.x,p.y];
+}
+
+/* PATH + ANIM */
+function drawRainbowPath(latlngs){
+  for(let i=0;i<latlngs.length-1;i++){
+    const col=rainbow7[i%rainbow7.length];
+    L.polyline([latlngs[i],latlngs[i+1]],{
+      color:col,weight:3,opacity:0.95,interactive:false
+    }).addTo(pathLayer);
+  }
+}
+
+function computePath(v,s,steps=48){
+  const pts=[];
+  for(let i=0;i<=steps;i++){
+    const t=i/steps;
+    const bulge=Math.sin(Math.PI*t)*8;
+    const lat=v.lat*(1-t)+s.lat*t+bulge*(1-Math.abs(0.5-t)*2)/100;
+    const lon=v.lon*(1-t)+s.lon*t;
+    pts.push([lat,lon]);
+  }
+  return pts;
+}
+
+const activeAnimations=[];
+
+function animateStarAlong(latlngPath,colors=rainbow7){
+  const pixels=latlngPath.map(ll=>latLngToPoint(L.latLng(ll[0],ll[1])));
+  const lens=[];
+  let total=0;
+  for(let i=0;i<pixels.length-1;i++){
+    const dx=pixels[i+1][0]-pixels[i][0];
+    const dy=pixels[i+1][1]-pixels[i][1];
+    const L=Math.hypot(dx,dy);
+    lens.push(L); total+=L;
+  }
+  if(total<2) return;
+
+  activeAnimations.push({
+    pixels,lens,total,
+    start:performance.now(),
+    travelTime:1400+Math.random()*1200,
+    colors
+  });
+}
+
+function loop(now){
+  ctx.clearRect(0,0,overlay.width,overlay.height);
+
+  for(let i=activeAnimations.length-1;i>=0;i--){
+    const A=activeAnimations[i];
+    const elapsed=now-A.start;
+    const t=Math.min(1,elapsed/A.travelTime);
+
+    const target=t*A.total;
+    let acc=0, idx=0;
+    while(idx<A.lens.length && acc+A.lens[idx]<target){
+      acc+=A.lens[idx]; idx++;
+    }
+    const prog=(target-acc)/(A.lens[idx]||1);
+    const p0=A.pixels[idx]||A.pixels.at(-1);
+    const p1=A.pixels[idx+1]||p0;
+    const x=p0[0]+(p1[0]-p0[0])*prog;
+    const y=p0[1]+(p1[1]-p0[1])*prog;
+
+    ctx.beginPath();
+    ctx.globalAlpha=1;
+    ctx.fillStyle="#fff";
+    ctx.arc(x,y,4.5,0,Math.PI*2);
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.globalAlpha=0.4*(1-t)+0.1;
+    ctx.lineWidth=1;
+    ctx.strokeStyle="#fff";
+    ctx.arc(x,y,10*(1-t)+2,0,Math.PI*2);
+    ctx.stroke();
+
+    if(t>=1) activeAnimations.splice(i,1);
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+/* =======================
+   SEND REQUEST
+   ======================= */
+function sendRequest(vid, sid=null){
+  const v=visitorMap.get(vid);
+  const s=serverMap.get(sid||sel.value||v.server);
+  if(!v||!s) return;
+  const path=computePath(v,s,64);
+  drawRainbowPath(path);
+  animateStarAlong(path);
+}
+
+/* =======================
+   SELF DETECTION + VISITOR
+   ======================= */
+async function detectSelf(){
+  try{
+    const r=await fetch("https://ipapi.co/json/");
+    const j=await r.json();
+    return {
+      id:"SELF",
+      name:"You",
+      lat:j.latitude,
+      lon:j.longitude,
+      server: sel.value || servers[0].id
+    };
+  }catch(e){
+    return null;
+  }
+}
+
+function addSelfVisitor(v){
+  const icon=L.divIcon({
+    className:'',
+    html:`<div class="self-dot"></div>`,
+    iconSize:[14,14], iconAnchor:[7,7]
+  });
+  const m=L.marker([v.lat,v.lon],{icon}).addTo(visitorLayer);
+  m.bindTooltip("YOU · Live visitor");
+  visitorMap.set("SELF",v);
+}
+
+function sendFiberBeam(v,s){
+  const path=computePath(v,s,72);
+  L.polyline(path,{
+    color:"#00e5ff",weight:4,opacity:0.65,
+    dashArray:"6 14",interactive:false
+  }).addTo(pathLayer);
+
+  animateStarAlong(path,["#fff","#a0f9ff","#00e5ff"]);
+}
+
+/* AUTO RUN */
+(async()=>{
+  const me=await detectSelf();
+  if(me){
+    addSelfVisitor(me);
+
+    const s=serverMap.get(me.server);
+    if(s) sendFiberBeam(me,s);
+
+    setInterval(()=>{
+      const s=serverMap.get(me.server);
+      sendFiberBeam(me,s);
+    },10000);
+  }
+})();
+
+/* =======================
+   EVENTS
+   ======================= */
+btn_sim.onclick=()=>{
+  const r=visitors[Math.floor(Math.random()*visitors.length)];
+  sendRequest(r.id);
+};
+btn_clear.onclick=()=>{
+  pathLayer.clearLayers();
+  activeAnimations.length=0;
+};
+btn_rotate.onclick=()=>{
+  const rot=document.getElementById('rotater');
+  if(!rot.dataset.rotated){
+    rot.style.transition='transform 0.8s cubic-bezier(.2,.9,.3,1)';
+    rot.style.transform='rotateX(22deg) rotateY(14deg)';
+    rot.dataset.rotated="1";
+    rot.animate([
+      {transform:'rotateX(22deg) rotateY(14deg)'},
+      {transform:'rotateX(22deg) rotateY(374deg)'}
+    ],{duration:24000,iterations:Infinity,easing:"linear"});
+  } else {
+    rot.style.transform='none';
+    rot.dataset.rotated="";
+    rot.getAnimations().forEach(a=>a.cancel());
+  }
+};
+
+map.on("click", e=>{
+  const tmp={lat:e.latlng.lat,lon:e.latlng.lng};
+  const s=serverMap.get(sel.value)||servers[0];
+  const path=computePath(tmp,s,64);
+  drawRainbowPath(path);
+  animateStarAlong(path);
+});
+
+/* FIX CANVAS SYNC */
+function syncOverlay(){ resizeCanvas(); }
+map.on("move",syncOverlay);
+map.on("zoom",syncOverlay);
+map.on("resize",syncOverlay);
+
+/* DEMO AUTO REQUEST */
+setInterval(()=>{
+  if(Math.random()<0.45){
+    const v=visitors[Math.floor(Math.random()*visitors.length)];
+    sendRequest(v.id);
+  }
+},2200);
+
+</script>
+</body>
+</html>
